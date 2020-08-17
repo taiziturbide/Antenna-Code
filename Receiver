@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+import time
+import sys
+import serial
+import argparse
+import csv
+import tkinter as tk
+from tkinter import Tk, Label, Button
+import chart_studio.plotly as py
+import plotly.graph_objects as go
+import multiprocessing
+import matplotlib
+import pandas as pd
+import matplotlib.pyplot as plt
+import pandas as pd
+import plotly.express as px
+plt.style.use("seaborn")
+
+from serial.threaded import LineReader, ReaderThread
+
+parser = argparse.ArgumentParser(description='LoRa Radio mode receiver.')
+parser.add_argument('port', help="Serial port descriptor")
+args = parser.parse_args()
+
+decimals = []
+values = []
+class PrintLines(LineReader):
+
+    def connection_made(self, transport):
+        print("connection made")
+        self.transport = transport
+        self.send_cmd('sys get ver')
+        self.send_cmd('mac pause')
+        self.send_cmd('radio set pwr 10')
+        self.send_cmd('radio rx 0')
+        self.send_cmd("sys set pindig GPIO10 0")
+        self.frame_count = 0
+
+
+    def handle_line(self, data):
+        tmp = []
+        print("DATA: %s" %data)
+        if data == "radio_err":
+            self.send_cmd('radio rx 0')
+            return
+        if "radio_rx" in data: #receiving hex vals -> making them decimals
+            tmp.append(data)
+            for i in tmp:
+                if "radio_rx" in i:
+                    for m in i.split("radio_rx "):
+                        if m!= "":
+                            if m[0] ==" ":
+                                bytes_object = bytes. fromhex(m[1:])
+                                ascii_string = bytes_object. decode("ASCII")
+                                decimals.append(ascii_string)
+                                tmp = []
+                            else:
+                                bytes_object = bytes. fromhex(m)
+                                ascii_string = bytes_object. decode("ASCII")
+                                decimals.append(ascii_string)
+                                tmp = []
+        print("DECIMALS = %s" %decimals)
+
+        self.send_cmd("sys set pindig GPIO10 1", delay=0)
+
+        self.send_cmd("sys set pindig GPIO10 0", delay = 1)
+        self.send_cmd("mac pause")
+        self.send_cmd("radio rx 0")
+        time.sleep(6)
+    def connection_lost(self, exc):
+        if exc:
+            print(exc)
+        print("port closed")
+
+    def send_cmd(self, cmd, delay = .5):
+        self.transport.write(('%s\r\n' %cmd).encode('UTF-8')) #this writes out the cmd like "mac pause"
+        time.sleep(delay)
+
+ser = serial.Serial(args.port, baudrate=57600)
+with ReaderThread(ser, PrintLines) as protocol:
+    while(1):
+        pass
+
+frame_count = 0
+
+with open("data.csv", "w") as file:
+    data = decimals [4:]
+    fieldnames = ["Time", "CO", "CO2", "RH", "Temp"]
+    writer = csv.DictWriter(file, fieldnames = fieldnames)
+
+    writer.writeheader()
+    for i in data:
+        row = i
+        writer.writerow({"Time": frame_count,"CO": row[0], "CO2": row[1], "RH":row[2], "Temp":row[3]})
+        frame_count = frame_count+1
+    file.close()
+
+with open('data.csv') as myFile:
+    reader = csv.reader(myFile)
+    for row in reader:
+        print(row)
+    myFile.close()
