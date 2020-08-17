@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+import time
+import sys
+import serial
+import argparse
+import csv
+
+from serial.threaded import LineReader, ReaderThread
+
+parser = argparse.ArgumentParser(description='LoRa Radio mode sender.')
+parser.add_argument('port', help="Serial port descriptor")
+args = parser.parse_args()
+
+class PrintLines(LineReader):
+
+    def connection_made(self, transport):
+        print("connection made")
+        self.transport = transport
+        self.send_cmd("sys set pindig GPIO11 0")
+        self.frame_count = 0
+        self.send_cmd("mac pause")
+        self.send_cmd("radio set pwr 10")
+
+    def handle_line(self, data):
+        print("RECV: %s" %data)
+        ## TO STOP EVERY LINE RECEIVED FROM PRINTING IN TERMINAL,DELETE ABOVE LINE
+        if data == "ok":
+            return
+
+    def connection_lost(self, exc):
+        if exc:
+            print(exc)
+        print("port closed")
+
+
+    def send_data(self):
+        self.send_cmd('mac pause')
+        hex_vals = []
+        tmp = ""
+        with open('Desktop/LoStik/random_data.csv') as myFile:
+            ## CHANGE FILE.CSV TO THE NAME OF THE CSV FILE YOU ARE TRYING TO TRANSMIT
+            reader = csv.reader(myFile)
+            for row in reader:
+                print(row) ## PRINTS VALS IN CSV FILE BEING TRANSMITTED
+                for i in row:
+                    for h in i.split(","):
+                        if len(h) == 1:
+                            a = hex(ord(h))
+                            hex_vals.append(a)
+                        if len(h)!=1 and len(h)!=0:
+                            for n in h:
+                                if n == " ":
+                                    pass
+                                else:
+                                    a = hex(ord(n))
+                                    tmp = tmp + str(a[2:])
+                            hex_vals.append(tmp)
+                            tmp = ""
+            myFile.close()
+        print("HEX VALS: %s" %hex_vals) ## SHOWS HEX VALS BEING TRANSMITTED
+        for i in hex_vals:
+            self.send_cmd("mac pause")
+            txt = "radio tx %s" %i
+            self.send_cmd(txt)
+            time.sleep(8) ## TIME INTERVAL IN SECONDS BTWN EACH TRANSMISSION
+            data = self.handle_line(self.send_cmd(txt))
+            if data == "radio_tx_ok":
+                self.send_cmd("mac pause")
+            else:
+                if data == "ok" or data == "busy":
+                    time.sleep(8)
+                    if data == "radio_tx_ok":
+                        pass
+                    else:
+                        return None
+                if data == "radio_err":
+                    print("RETRYING - TIMEOUT ERROR")
+                    self.send_cmd("mac pause")
+                    self.send_cmd(txt)
+                    time.sleep(8)
+                    return
+                if data == "None":
+                    return None
+                if data == "invalid_param":
+                    print("INVALID DATA POINT")
+                    self.send_cmd("radio tx -0x1")
+                    return
+        self.send_cmd("sys set pindig GPIO11 1")
+
+    def send_cmd(self, cmd, delay=.5):
+        print("SEND: %s" % cmd)
+        self.write_line(cmd)
+        time.sleep(delay)
+
+
+ser = serial.Serial(args.port, baudrate=57600)
+with ReaderThread(ser, PrintLines) as protocol:
+    #while(1):
+    ## IF LINE ABOVE IS ADDED, IT WILL LOOP CONTINUOUSLY AND KEEP SENDING THE DATA IN THE CSV FILE UNTIL PROGRAM TERMINATED
+    protocol.send_data()
+    time.sleep(10)
